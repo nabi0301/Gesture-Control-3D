@@ -40,11 +40,13 @@ class GestureController3D:
         # Gesture detection
         self.prev_distance = 0
         
-        # Shape management
-        self.shapes = ["Cube", "Pyramid", "Sphere", "Tetrahedron"]
-        self.current_shape = 0
+        # Map management
+        self.map_offset_x = 0.0
+        self.map_offset_y = 0.0
+        self.map_zoom = 1.0
         self.prev_hand_x = None
-        self.swipe_threshold = 0.1
+        self.prev_hand_y = None
+        self.map_pan_threshold = 0.05
     
     def calculate_distance(self, point1, point2):
         """Calculate Euclidean distance between two points"""
@@ -199,139 +201,128 @@ class GestureController3D:
         
         self.draw_sphere(palm_x, palm_y, palm_z, radius=0.25, color=(1.0, 1.0, 0.0))
     
-    def detect_swipe(self, hand_landmarks, hand_label):
-        """Detect swipe gestures to change shapes"""
-        wrist = hand_landmarks.landmark[0]
-        middle_finger = hand_landmarks.landmark[9]
+    def detect_pan(self, hand_landmarks, hand_label):
+        """Detect hand movement to pan the map"""
+        palm_x = hand_landmarks.landmark[9].x
+        palm_y = hand_landmarks.landmark[9].y
         
-        current_x = middle_finger.x
-        
-        # Only detect swipes with right hand
-        if hand_label == "Right":
-            if self.prev_hand_x is not None:
-                swipe_distance = current_x - self.prev_hand_x
+        if hand_label == "Left":
+            if self.prev_hand_x is not None and self.prev_hand_y is not None:
+                # Calculate delta movement
+                delta_x = palm_x - self.prev_hand_x
+                delta_y = palm_y - self.prev_hand_y
                 
-                # Swipe right - next shape
-                if swipe_distance > self.swipe_threshold:
-                    self.current_shape = (self.current_shape + 1) % len(self.shapes)
-                    print(f"Switched to: {self.shapes[self.current_shape]}")
-                    self.prev_hand_x = current_x
-                
-                # Swipe left - previous shape
-                elif swipe_distance < -self.swipe_threshold:
-                    self.current_shape = (self.current_shape - 1) % len(self.shapes)
-                    print(f"Switched to: {self.shapes[self.current_shape]}")
-                    self.prev_hand_x = current_x
+                # Update map offset based on movement
+                self.map_offset_x -= delta_x * 10
+                self.map_offset_y += delta_y * 10
             
-            self.prev_hand_x = current_x
+            self.prev_hand_x = palm_x
+            self.prev_hand_y = palm_y
     
-    def draw_pyramid(self):
-        """Draw a pyramid"""
-        glBegin(GL_TRIANGLES)
+    def detect_zoom(self, hand_landmarks, hand_label):
+        """Detect pinch gesture to zoom the map"""
+        if hand_label == "Right":
+            thumb_tip = hand_landmarks.landmark[4]
+            index_tip = hand_landmarks.landmark[8]
+            distance = self.calculate_distance(
+                (thumb_tip.x, thumb_tip.y),
+                (index_tip.x, index_tip.y)
+            )
+            
+            if self.prev_distance > 0:
+                # Increase zoom if fingers moving apart, decrease if pinching
+                zoom_delta = (distance - self.prev_distance) * 5
+                self.map_zoom += zoom_delta
+                self.map_zoom = max(0.5, min(3.0, self.map_zoom))
+            
+            self.prev_distance = distance
+    
+    def draw_map_grid(self):
+        """Draw an interactive grid-based map"""
+        grid_size = 20
+        grid_spacing = 2.0
         
-        # Front face (red)
-        glColor3f(1, 0, 0)
-        glVertex3f(0, 1, 0)
-        glVertex3f(-1, -1, 1)
-        glVertex3f(1, -1, 1)
+        glColor3f(0.3, 0.3, 0.3)
+        glBegin(GL_LINES)
         
-        # Right face (green)
-        glColor3f(0, 1, 0)
-        glVertex3f(0, 1, 0)
-        glVertex3f(1, -1, 1)
-        glVertex3f(1, -1, -1)
-        
-        # Back face (blue)
-        glColor3f(0, 0, 1)
-        glVertex3f(0, 1, 0)
-        glVertex3f(1, -1, -1)
-        glVertex3f(-1, -1, -1)
-        
-        # Left face (yellow)
-        glColor3f(1, 1, 0)
-        glVertex3f(0, 1, 0)
-        glVertex3f(-1, -1, -1)
-        glVertex3f(-1, -1, 1)
+        # Draw grid lines with offset and zoom
+        for i in range(-grid_size, grid_size):
+            # Vertical lines
+            glVertex3f(i * grid_spacing, -grid_size * grid_spacing, 0)
+            glVertex3f(i * grid_spacing, grid_size * grid_spacing, 0)
+            
+            # Horizontal lines
+            glVertex3f(-grid_size * grid_spacing, i * grid_spacing, 0)
+            glVertex3f(grid_size * grid_spacing, i * grid_spacing, 0)
         
         glEnd()
         
-        # Base (cyan)
-        glBegin(GL_QUADS)
-        glColor3f(0, 1, 1)
-        glVertex3f(-1, -1, 1)
-        glVertex3f(1, -1, 1)
-        glVertex3f(1, -1, -1)
-        glVertex3f(-1, -1, -1)
-        glEnd()
+        # Draw terrain features (cities/landmarks)
+        self.draw_map_features()
     
-    def draw_sphere_shape(self):
-        """Draw a sphere"""
-        quad = gluNewQuadric()
-        glColor3f(1, 0.5, 0)
-        gluSphere(quad, 1.0, 32, 32)
-    
-    def draw_tetrahedron(self):
-        """Draw a tetrahedron"""
-        glBegin(GL_TRIANGLES)
-        
-        # Vertices of tetrahedron
-        vertices = [
-            (1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)
+    def draw_map_features(self):
+        """Draw map features like cities and roads"""
+        # Define some city locations
+        cities = [
+            (0, 0, "Central"),
+            (10, 10, "North East"),
+            (-10, 10, "North West"),
+            (10, -10, "South East"),
+            (-10, -10, "South West"),
+            (5, 0, "East"),
+            (-5, 0, "West"),
+            (0, 5, "North"),
+            (0, -5, "South"),
         ]
-        colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0)]
-        faces = [
-            (0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)
-        ]
         
-        for face_idx, face in enumerate(faces):
-            glColor3f(*colors[face_idx])
-            for vertex_idx in face:
-                v = vertices[vertex_idx]
-                glVertex3f(v[0], v[1], v[2])
+        # Draw cities as colored spheres
+        for x, y, name in cities:
+            glPushMatrix()
+            glTranslatef(x + self.map_offset_x, y + self.map_offset_y, 0.1)
+            glColor3f(1.0, 0.5, 0.0)
+            quad = gluNewQuadric()
+            gluSphere(quad, 0.3 / self.map_zoom, 16, 16)
+            glPopMatrix()
         
+        # Draw some roads (connecting lines)
+        glColor3f(0.5, 0.5, 0.0)
+        glBegin(GL_LINES)
+        for i in range(len(cities) - 1):
+            x1, y1, _ = cities[i]
+            x2, y2, _ = cities[i + 1]
+            glVertex3f(x1 + self.map_offset_x, y1 + self.map_offset_y, 0.05)
+            glVertex3f(x2 + self.map_offset_x, y2 + self.map_offset_y, 0.05)
         glEnd()
+        
+        # Draw coordinate axes at center
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+        # X axis (red)
+        glColor3f(1.0, 0.0, 0.0)
+        glVertex3f(-5, 0, 0)
+        glVertex3f(5, 0, 0)
+        # Y axis (green)
+        glColor3f(0.0, 1.0, 0.0)
+        glVertex3f(0, -5, 0)
+        glVertex3f(0, 5, 0)
+        glEnd()
+        glLineWidth(1.0)
     
-    def draw_shape(self):
-        """Draw the current shape based on selection"""
-        if self.current_shape == 0:  # Cube
-            self.draw_opengl_cube()
-        elif self.current_shape == 1:  # Pyramid
-            self.draw_pyramid()
-        elif self.current_shape == 2:  # Sphere
-            self.draw_sphere_shape()
-        elif self.current_shape == 3:  # Tetrahedron
-            self.draw_tetrahedron()
+    def draw_map(self):
+        """Draw the interactive map with gesture controls"""
+        # Apply map transformations
+        glTranslatef(0, 0, -10)
+        glScalef(self.map_zoom, self.map_zoom, 1.0)
+        
+        # Draw the map grid and features
+        self.draw_map_grid()
     
     def draw_opengl_cube(self):
-        """Draw a 3D cube using OpenGL"""
-        glBegin(GL_QUADS)
-        
-        # Define cube faces with colors
-        faces = [
-            # Front face (red)
-            ((1, 1, 1), (1, 1, -1), (1, -1, -1), (1, -1, 1), (1, 0, 0)),
-            # Back face (green)
-            ((-1, 1, 1), (-1, -1, 1), (-1, -1, -1), (-1, 1, -1), (0, 1, 0)),
-            # Top face (blue)
-            ((1, 1, 1), (-1, 1, 1), (-1, 1, -1), (1, 1, -1), (0, 0, 1)),
-            # Bottom face (yellow)
-            ((1, -1, 1), (1, -1, -1), (-1, -1, -1), (-1, -1, 1), (1, 1, 0)),
-            # Right face (cyan)
-            ((1, 1, 1), (1, -1, 1), (-1, -1, 1), (-1, 1, 1), (0, 1, 1)),
-            # Left face (magenta)
-            ((-1, 1, 1), (-1, -1, 1), (1, -1, -1), (1, 1, -1), (1, 0, 1)),
-        ]
-        
-        for face in faces:
-            color = face[4]
-            glColor3f(*color)
-            for vertex in face[:4]:
-                glVertex3f(*vertex)
-        
-        glEnd()
+        """Deprecated - replaced with map drawing"""
+        pass
 
     def run_opengl(self):
-        """Main loop with OpenGL visualization"""
+        """Main loop with OpenGL map visualization"""
         if not HAS_OPENGL:
             print("OpenGL/Pygame not installed. Run: pip install pygame PyOpenGL PyOpenGL_accelerate")
             self.run()  # Fallback to simple mode
@@ -340,27 +331,24 @@ class GestureController3D:
         pygame.init()
         display = (800, 600)
         screen = pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
-        pygame.display.set_caption("Gesture Control 3D Model")
+        pygame.display.set_caption("Gesture Control Map Navigation")
         
         glEnable(GL_DEPTH_TEST)
         glMatrixMode(GL_PROJECTION)
         gluPerspective(45, (display[0] / display[1]), 0.1, 50.0)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        glTranslatef(0.0, 0.0, -5)
         
         print("=" * 50)
-        print("Gesture Control 3D Model (OpenGL)")
+        print("Gesture Control Map Navigation")
         print("=" * 50)
         print("\nControls:")
         print("  Left Hand:")
-        print("    - Move UP/DOWN: Rotate X axis")
-        print("    - Move LEFT/RIGHT: Rotate Y axis")
+        print("    - Move hand to PAN the map")
         print("  Right Hand:")
-        print("    - PINCH gesture: Scale model")
-        print("  Right Hand Swipe:")
-        print("    - Swipe RIGHT: Next shape")
-        print("    - Swipe LEFT: Previous shape")
+        print("    - PINCH gesture (thumb + index): ZOOM in/out")
+        print("    - Move fingers apart: Zoom in")
+        print("    - Pinch (bring together): Zoom out")
         print("  Press 'q' or close window to quit\n")
         
         clock = pygame.time.Clock()
@@ -382,60 +370,31 @@ class GestureController3D:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(rgb_frame)
             
-            hand_landmarks_list = []  # Store for gesture node rendering
-            
             if results.multi_hand_landmarks and results.multi_handedness:
                 for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                     hand_label = handedness.classification[0].label
-                    hand_pos = self.get_hand_position(hand_landmarks)
-                    hand_landmarks_list.append((hand_landmarks, hand_label))
                     
-                    # Detect swipe gestures
-                    self.detect_swipe(hand_landmarks, hand_label)
-                    
+                    # Detect pan with left hand
                     if hand_label == "Left":
-                        self.rotation_y = (hand_pos[0] - 0.5) * 180
-                        self.rotation_x = (hand_pos[1] - 0.5) * 180
+                        self.detect_pan(hand_landmarks, hand_label)
                     
+                    # Detect zoom with right hand
                     if hand_label == "Right":
-                        thumb_tip = hand_landmarks.landmark[4]
-                        index_tip = hand_landmarks.landmark[8]
-                        distance = self.calculate_distance(
-                            (thumb_tip.x, thumb_tip.y),
-                            (index_tip.x, index_tip.y)
-                        )
-                        
-                        if self.prev_distance > 0:
-                            self.scale += (distance - self.prev_distance) * 5
-                            self.scale = max(0.5, min(2.0, self.scale))
-                        
-                        self.prev_distance = distance
+                        self.detect_zoom(hand_landmarks, hand_label)
             
             # Clear screen
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             glLoadIdentity()
-            glTranslatef(0.0, 0.0, -5)
             
-            # Apply rotations
-            glRotatef(self.rotation_x, 1, 0, 0)
-            glRotatef(self.rotation_y, 0, 1, 0)
-            glRotatef(self.rotation_z, 0, 0, 1)
-            
-            # Apply scale
-            glScalef(self.scale, self.scale, self.scale)
-            
-            # Draw the current shape
-            self.draw_shape()
-            
-            # Draw gesture nodes for hand landmarks
-            for hand_landmarks, hand_label in hand_landmarks_list:
-                self.draw_gesture_nodes(hand_landmarks, hand_label)
+            # Draw the map
+            self.draw_map()
             
             pygame.display.flip()
             clock.tick(30)
         
         self.cap.release()
         pygame.quit()
+        print("\nMap navigation closed successfully!")
     
     def run(self):
         """Main loop"""

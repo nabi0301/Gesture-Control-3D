@@ -1,16 +1,16 @@
-# Gesture Control 3D Model
+# Gesture Control Map Navigation
 
-A real-time gesture-controlled 3D shape visualization system using hand tracking with MediaPipe and OpenGL.
+A real-time interactive map navigation system using hand gesture recognition with MediaPipe and OpenGL. Control a 2D map through natural hand movements - pan the map with your left hand and zoom with pinch gestures from your right hand.
 
 ## Features
 
 - 🎮 **Hand Gesture Recognition**: Real-time hand tracking using MediaPipe
-- 🔄 **Multiple 3D Shapes**: Cube, Pyramid, Sphere, and Tetrahedron
-- 🎯 **Gesture Nodes**: Visual representation of hand landmarks as 3D nodes
-- 🖱️ **Interactive Controls**:
-  - **Left Hand**: Rotate 3D model (X/Y axes)
-  - **Right Hand Pinch**: Scale/zoom the model
-  - **Right Hand Swipe**: Switch between shapes (left/right)
+- 🗺️ **Interactive Map**: Grid-based map with cities and landmarks
+- 🖐️ **Gesture Controls**:
+  - **Left Hand**: Pan the map (move hand to navigate)
+  - **Right Hand Pinch**: Zoom in/out (spread fingers to zoom in, pinch to zoom out)
+- 📍 **Map Features**: Multiple cities, roads, and coordinate axes visualization
+- 🎯 **Smooth Navigation**: Responsive gesture detection with zoom bounds
 
 ## Requirements
 
@@ -43,72 +43,83 @@ python gesture_3d_control.py
 ### Controls
 
 **Left Hand:**
-- Move UP/DOWN → Rotate X axis
-- Move LEFT/RIGHT → Rotate Y axis
+- Move your hand in any direction → **Pan the map** (navigate around)
 
 **Right Hand:**
-- PINCH gesture → Scale/zoom model
-- SWIPE RIGHT → Next shape
-- SWIPE LEFT → Previous shape
+- Thumb + Index finger apart → **Zoom in**
+- Thumb + Index finger together (pinch) → **Zoom out**
+- Zoom range: 0.5x to 3.0x
 
-**General:**
-- Press 'Q' or close window → Quit
+**Other:**
+- Press 'q' or close window → Exit application
 
 ## How It Works
 
-1. **Hand Detection**: Uses MediaPipe's hand tracking to detect hand landmarks in real-time
-2. **Gesture Recognition**: Detects hand position and swipe gestures to control the 3D model
-3. **3D Rendering**: Uses PyOpenGL to render interactive 3D shapes
-4. **Gesture Visualization**: Displays hand landmark positions as colored nodes in 3D space
+### Hand Tracking
+- Uses MediaPipe's hand tracking solution to detect both hands in real-time
+- Tracks 21 landmark points per hand for precise gesture recognition
 
-## Shapes Available
+### Map Navigation
+- **Panning**: Left hand X/Y position controls map offset
+- **Zooming**: Distance between thumb and index finger on right hand controls zoom level
+- Grid-based map with visual landmarks (cities)
 
-- **Cube**: Colorful 6-sided 3D box
-- **Pyramid**: 5-sided pyramid with color-coded faces
-- **Sphere**: Orange spherical shape
-- **Tetrahedron**: 4-sided triangular shape
+### Map Features
+- Grid background for reference
+- Nine cities positioned across the map
+- Roads connecting cities
+- X/Y coordinate axes at the center
+- Dynamic camera that scales and pans based on gestures
 
-## Gesture Node Colors
+## Map Structure
 
-- 🟦 **Cyan nodes**: Left hand finger tips
-- 🟪 **Magenta nodes**: Right hand finger tips
-- 🟨 **Yellow node**: Hand palm center
-
-## Performance
-
-- 30 FPS refresh rate
-- Real-time hand tracking latency: <50ms
-- Optimized for systems with integrated graphics
+The map displays:
+- **Central Grid**: Reference grid lines for orientation
+- **Cities**: Orange spheres representing major locations
+  - Central, North East, North West, South East, South West
+  - East, West, North, South directions
+- **Roads**: Yellow lines connecting cities
+- **Axes**: Red (X-axis) and Green (Y-axis) for coordinate reference
 
 ## Troubleshooting
 
-### No hand detection:
-- Ensure good lighting conditions
-- Keep hands visible and within frame
-- Adjust MediaPipe confidence thresholds in code
+### No video capture
+- Ensure your webcam is connected and not in use by another application
+- Check that OpenCV can access the camera
 
-### Low performance:
-- Reduce window resolution
-- Lower the FPS (change `clock.tick(30)` to a lower value)
-- Update GPU drivers
+### Hand not detected
+- Ensure good lighting conditions
+- Position hand clearly in front of the camera
+- MediaPipe requires at least 70% detection confidence
+
+### Map not rendering
+- Verify OpenGL/Pygame installation
+- Check that graphics drivers are up to date
+- Run with administrator privileges if needed
+
+### Zoom not responding
+- Ensure the distance between thumb and index finger is visible
+- Try spreading fingers more dramatically for zoom in
+- Pinch more tightly for zoom out
 
 ## Future Enhancements
 
-- [ ] Additional 3D shapes (cylinder, cone, torus)
-- [ ] Color customization for shapes
-- [ ] Recording and playback of gestures
-- [ ] Multi-hand complex gestures
-- [ ] Save/export 3D model states
-- [ ] Voice control integration
+- [ ] Satellite/terrain map layers
+- [ ] Real map data integration (OpenStreetMap)
+- [ ] Gestures to change map modes
+- [ ] Path drawing with hand traces
+- [ ] Keyboard shortcuts for quick controls
+- [ ] Map rotation with two-hand gestures
+- [ ] Add more map features (markers, layers)
+- [ ] Customizable map styles
 
-## Author
+## Performance Tips
 
-Created as a gesture-controlled 3D visualization project.
+- Use in well-lit environments for better hand tracking
+- Avoid reflective objects that might interfere with the camera
+- Keep hands within the camera view
+- Smooth movements for better gesture recognition
 
 ## License
 
-MIT License
-
-## Contributing
-
-Feel free to fork, modify, and improve this project!
+This project uses MediaPipe (Apache 2.0) and PyOpenGL (BSD License).
