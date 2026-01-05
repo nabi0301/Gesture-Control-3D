@@ -407,7 +407,6 @@ class GestureController3D:
         screen = pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
         pygame.display.set_caption("Gesture Control Map Navigation")
         
-        glEnable(GL_DEPTH_TEST)
         glMatrixMode(GL_PROJECTION)
         gluPerspective(45, (display[0] / display[1]), 0.1, 500.0)
         glMatrixMode(GL_MODELVIEW)
@@ -457,12 +456,19 @@ class GestureController3D:
                     if hand_label == "Right":
                         self.detect_zoom(hand_landmarks, hand_label)
             
+            # Disable depth testing for flat map rendering
+            glDisable(GL_DEPTH_TEST)
+            
             # Clear screen
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             glLoadIdentity()
+            glTranslatef(0, 0, -150)
             
             # Draw the map
             self.draw_map()
+            
+            # Re-enable depth testing for 3D elements if needed
+            glEnable(GL_DEPTH_TEST)
             
             pygame.display.flip()
             clock.tick(30)
