@@ -237,6 +237,75 @@ class GestureController3D:
             
             self.prev_distance = distance
     
+    def draw_world_map(self):
+        """Draw simplified world map with continents and oceans"""
+        # Ocean background - fill entire view
+        glColor3f(0.2, 0.4, 0.7)  # Ocean blue
+        glBegin(GL_QUADS)
+        glVertex3f(-100, -100, -0.1)
+        glVertex3f(100, -100, -0.1)
+        glVertex3f(100, 100, -0.1)
+        glVertex3f(-100, 100, -0.1)
+        glEnd()
+        
+        # Draw continents as large colored rectangles
+        continents = [
+            # (x1, y1, x2, y2, color) - position on map
+            (-80, 20, -40, 60, (0.3, 0.6, 0.2)),    # North America
+            (-75, -50, -30, 10, (0.3, 0.6, 0.2)),   # South America
+            (-25, 10, 40, 65, (0.25, 0.55, 0.2)),   # Europe + Africa
+            (35, -60, 85, 10, (0.3, 0.6, 0.2)),     # Australia area
+            (20, 10, 85, 70, (0.28, 0.58, 0.2)),    # Asia
+            (50, 60, 80, 90, (0.3, 0.6, 0.2)),      # Arctic
+        ]
+        
+        # Draw continent shapes
+        for x1, y1, x2, y2, color in continents:
+            glColor3f(*color)
+            glBegin(GL_QUADS)
+            glVertex3f(x1, y1, 0)
+            glVertex3f(x2, y1, 0)
+            glVertex3f(x2, y2, 0)
+            glVertex3f(x1, y2, 0)
+            glEnd()
+        
+        # Draw country/region borders (light lines)
+        glColor3f(0.5, 0.5, 0.5)
+        glLineWidth(0.5)
+        glBegin(GL_LINES)
+        
+        # Vertical border lines
+        for x in range(-80, 90, 20):
+            glVertex3f(x, -90, 0.1)
+            glVertex3f(x, 90, 0.1)
+        
+        # Horizontal border lines
+        for y in range(-80, 90, 20):
+            glVertex3f(-90, y, 0.1)
+            glVertex3f(90, y, 0.1)
+        
+        glEnd()
+        glLineWidth(1.0)
+        
+        # Draw major city markers on continents
+        cities = [
+            (-60, 40, (1.0, 0.2, 0.2)),      # North America - Red
+            (-50, -20, (1.0, 0.2, 0.2)),     # South America - Red
+            (0, 50, (1.0, 0.8, 0.0)),        # Europe - Yellow
+            (15, 0, (1.0, 0.8, 0.0)),        # Africa - Yellow
+            (60, 40, (0.2, 0.8, 1.0)),       # Asia - Cyan
+            (60, -30, (0.8, 0.2, 1.0)),      # Australia - Magenta
+        ]
+        
+        # Draw city markers as small squares
+        for cx, cy, color in cities:
+            glColor3f(*color)
+            glPointSize(8.0)
+            glBegin(GL_POINTS)
+            glVertex3f(cx, cy, 0.2)
+            glEnd()
+            glPointSize(1.0)
+    
     def draw_map_grid(self):
         """Draw an interactive grid-based map"""
         grid_size = 20
@@ -309,13 +378,13 @@ class GestureController3D:
         glLineWidth(1.0)
     
     def draw_map(self):
-        """Draw the interactive map with gesture controls"""
+        """Draw the interactive world map with gesture controls"""
         # Apply map transformations
-        glTranslatef(0, 0, -10)
+        glTranslatef(self.map_offset_x * 0.2, self.map_offset_y * 0.2, -15)
         glScalef(self.map_zoom, self.map_zoom, 1.0)
         
-        # Draw the map grid and features
-        self.draw_map_grid()
+        # Draw the world map with continents
+        self.draw_world_map()
     
     def draw_opengl_cube(self):
         """Deprecated - replaced with map drawing"""
