@@ -444,9 +444,11 @@ class GestureController3D:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(rgb_frame)
             
+            hand_landmarks_list = []
             if results.multi_hand_landmarks and results.multi_handedness:
                 for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                     hand_label = handedness.classification[0].label
+                    hand_landmarks_list.append((hand_landmarks, hand_label))
                     
                     # Detect pan with left hand
                     if hand_label == "Left":
@@ -456,19 +458,22 @@ class GestureController3D:
                     if hand_label == "Right":
                         self.detect_zoom(hand_landmarks, hand_label)
             
-            # Disable depth testing for flat map rendering
-            glDisable(GL_DEPTH_TEST)
-            
             # Clear screen
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             glLoadIdentity()
-            glTranslatef(0, 0, -150)
+            
+            # Disable depth testing for map background
+            glDisable(GL_DEPTH_TEST)
             
             # Draw the map
             self.draw_map()
             
-            # Re-enable depth testing for 3D elements if needed
+            # Enable depth testing for hand nodes and UI
             glEnable(GL_DEPTH_TEST)
+            
+            # Draw hand landmark nodes on top
+            for hand_landmarks, hand_label in hand_landmarks_list:
+                self.draw_gesture_nodes(hand_landmarks, hand_label)
             
             pygame.display.flip()
             clock.tick(30)
