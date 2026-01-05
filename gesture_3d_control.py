@@ -56,6 +56,7 @@ class GestureController3D:
         self.longitude = 0.0  # Start at prime meridian
         self.zoom_level = 3   # Zoom level (1-18)
         self.tile_texture = None
+        self.tile_image = None  # Store image separately
         self.map_dirty = True  # Flag to update map tiles
     
     def calculate_distance(self, point1, point2):
@@ -223,6 +224,8 @@ class GestureController3D:
         try:
             x, y, z = self.lat_lon_to_tile(lat, lon, zoom)
             
+            print(f"Fetching tiles: x={x}, y={y}, z={z}")
+            
             # Fetch 3x3 grid of tiles around the center
             tiles_data = []
             for dx in range(-1, 2):
@@ -234,15 +237,20 @@ class GestureController3D:
                     url = f"https://tile.openstreetmap.org/{z}/{tile_x}/{tile_y}.png"
                     
                     try:
-                        response = requests.get(url, timeout=2)
+                        response = requests.get(url, timeout=3)
                         if response.status_code == 200:
                             img = Image.open(BytesIO(response.content))
                             tiles_data.append(img)
+                            print(f"  Fetched tile {z}/{tile_x}/{tile_y}")
                         else:
                             # Create blank tile if fetch fails
                             tiles_data.append(Image.new('RGB', (tile_size, tile_size), color=(100, 150, 200)))
-                    except:
-                        # Create blank tile on error
+                            print(f"  Failed to fetch {z}/{tile_x}/{tile_y}, using blank")
+                    except requests.Timeout:
+                        print(f"  Timeout fetching {z}/{tile_x}/{tile_y}")
+                        tiles_data.append(Image.new('RGB', (tile_size, tile_size), color=(100, 150, 200)))
+                    except Exception as e:
+                        print(f"  Error fetching {z}/{tile_x}/{tile_y}: {e}")
                         tiles_data.append(Image.new('RGB', (tile_size, tile_size), color=(100, 150, 200)))
             
             # Composite 3x3 tiles into one image
@@ -252,6 +260,7 @@ class GestureController3D:
                 col = i % 3
                 composite.paste(tile, (col * tile_size, row * tile_size))
             
+            print(f"Composite created: {composite.size}")
             return composite
         except Exception as e:
             print(f"Error fetching map tiles: {e}")
@@ -265,6 +274,11 @@ class GestureController3D:
             if image.mode != 'RGB':
                 image = image.convert('RGB')
             
+            # Make sure we have a valid OpenGL context
+            if glGetString(GL_VERSION) is None:
+                print("ERROR: No active OpenGL context for texture creation")
+                return None
+            
             image_data = image.tobytes("raw", "RGB", 0, -1)
             
             # Create texture
@@ -274,6 +288,7 @@ class GestureController3D:
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.width, image.height, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
             
+            print(f"Texture created successfully: {texture}")
             return texture
         except Exception as e:
             print(f"Error creating texture: {e}")
@@ -283,8 +298,8 @@ class GestureController3D:
         """Update map tiles based on current position"""
         if self.map_dirty:
             print(f"Fetching map tiles for {self.latitude:.2f}, {self.longitude:.2f} (zoom: {self.zoom_level})")
-            map_image = self.fetch_map_tiles(self.latitude, self.longitude, self.zoom_level)
-            self.tile_texture = self.image_to_texture(map_image)
+            self.tile_image = self.fetch_map_tiles(self.latitude, self.longitude, self.zoom_level)
+            self.tile_texture = None  # Reset texture so it gets recreated
             self.map_dirty = False
     
     def detect_pan(self, hand_landmarks, hand_label):
@@ -336,30 +351,51 @@ class GestureController3D:
     
     def draw_world_map(self):
         """Draw real OpenStreetMap tiles as a textured background"""
-        # Update tiles if needed
+        # Update tiles if needed (fetch image)
         self.update_map_tiles()
         
-        # Draw textured map if tiles are available
+        # Convert image to texture if we have a new image
+        if self.tile_image is not None and self.tile_texture is None:
+            self.tile_texture = self.image_to_texture(self.tile_image)
+        
+        # Draw textured map if texture is available
         if self.tile_texture is not None:
-            glEnable(GL_TEXTURE_2D)
-            glBindTexture(GL_TEXTURE_2D, self.tile_texture)
-            
-            # Draw a large quad with the map texture
-            glColor3f(1.0, 1.0, 1.0)
-            glBegin(GL_QUADS)
-            glTexCoord2f(0, 1)
-            glVertex3f(-150, -120, 0)
-            glTexCoord2f(1, 1)
-            glVertex3f(150, -120, 0)
-            glTexCoord2f(1, 0)
-            glVertex3f(150, 120, 0)
-            glTexCoord2f(0, 0)
-            glVertex3f(-150, 120, 0)
-            glEnd()
-            
-            glDisable(GL_TEXTURE_2D)
+            try:
+                glEnable(GL_TEXTURE_2D)
+                glBindTexture(GL_TEXTURE_2D, self.tile_texture)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                
+                # Draw a large quad with the map texture
+                glColor3f(1.0, 1.0, 1.0)
+                glBegin(GL_QUADS)
+                
+                glTexCoord2f(0, 1)
+                glVertex3f(-150, -120, 0)
+                
+                glTexCoord2f(1, 1)
+                glVertex3f(150, -120, 0)
+                
+                glTexCoord2f(1, 0)
+                glVertex3f(150, 120, 0)
+                
+                glTexCoord2f(0, 0)
+                glVertex3f(-150, 120, 0)
+                
+                glEnd()
+                glDisable(GL_TEXTURE_2D)
+            except Exception as e:
+                print(f"Error drawing texture: {e}")
+                # Fallback to solid color
+                glColor3f(0.1, 0.4, 0.8)
+                glBegin(GL_QUADS)
+                glVertex3f(-150, -120, 0)
+                glVertex3f(150, -120, 0)
+                glVertex3f(150, 120, 0)
+                glVertex3f(-150, 120, 0)
+                glEnd()
         else:
-            # Fallback: draw ocean blue background
+            # Fallback: draw ocean blue background with loading indicator
             glColor3f(0.1, 0.4, 0.8)
             glBegin(GL_QUADS)
             glVertex3f(-150, -120, 0)
@@ -367,10 +403,14 @@ class GestureController3D:
             glVertex3f(150, 120, 0)
             glVertex3f(-150, 120, 0)
             glEnd()
-        
-        # Draw coordinate info
-        glDisable(GL_LIGHTING)
-        glColor3f(1.0, 1.0, 1.0)
+            
+            # Draw "loading" indicator
+            glColor3f(1.0, 1.0, 0.0)
+            glPointSize(5.0)
+            glBegin(GL_POINTS)
+            glVertex3f(0, 0, 0.1)
+            glEnd()
+            glPointSize(1.0)
     
     def draw_map_grid(self):
         """Draw an interactive grid-based map"""
