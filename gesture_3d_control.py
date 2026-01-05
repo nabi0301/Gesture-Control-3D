@@ -4,6 +4,9 @@ from mediapipe.framework.formats import landmark_pb2
 import numpy as np
 import math
 from collections import deque
+import requests
+from PIL import Image
+from io import BytesIO
 try:
     from OpenGL.GL import *
     from OpenGL.GLU import *
@@ -47,6 +50,13 @@ class GestureController3D:
         self.prev_hand_x = None
         self.prev_hand_y = None
         self.map_pan_threshold = 0.05
+        
+        # Real map tile management
+        self.latitude = 20.0  # Start at equator
+        self.longitude = 0.0  # Start at prime meridian
+        self.zoom_level = 3   # Zoom level (1-18)
+        self.tile_texture = None
+        self.map_dirty = True  # Flag to update map tiles
     
     def calculate_distance(self, point1, point2):
         """Calculate Euclidean distance between two points"""
@@ -201,6 +211,82 @@ class GestureController3D:
         
         self.draw_sphere(palm_x, palm_y, palm_z, radius=0.25, color=(1.0, 1.0, 0.0))
     
+    def lat_lon_to_tile(self, lat, lon, zoom):
+        """Convert latitude/longitude to tile coordinates"""
+        n = 2.0 ** zoom
+        x = int((lon + 180.0) / 360.0 * n)
+        y = int((1.0 - math.log(math.tan(math.radians(lat)) + 1.0 / math.cos(math.radians(lat))) / math.pi) / 2.0 * n)
+        return x, y, zoom
+    
+    def fetch_map_tiles(self, lat, lon, zoom, tile_size=256):
+        """Fetch map tiles from OpenStreetMap and composite them"""
+        try:
+            x, y, z = self.lat_lon_to_tile(lat, lon, zoom)
+            
+            # Fetch 3x3 grid of tiles around the center
+            tiles_data = []
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    tile_x = x + dx
+                    tile_y = y + dy
+                    
+                    # OpenStreetMap tile URL
+                    url = f"https://tile.openstreetmap.org/{z}/{tile_x}/{tile_y}.png"
+                    
+                    try:
+                        response = requests.get(url, timeout=2)
+                        if response.status_code == 200:
+                            img = Image.open(BytesIO(response.content))
+                            tiles_data.append(img)
+                        else:
+                            # Create blank tile if fetch fails
+                            tiles_data.append(Image.new('RGB', (tile_size, tile_size), color=(100, 150, 200)))
+                    except:
+                        # Create blank tile on error
+                        tiles_data.append(Image.new('RGB', (tile_size, tile_size), color=(100, 150, 200)))
+            
+            # Composite 3x3 tiles into one image
+            composite = Image.new('RGB', (tile_size * 3, tile_size * 3))
+            for i, tile in enumerate(tiles_data):
+                row = i // 3
+                col = i % 3
+                composite.paste(tile, (col * tile_size, row * tile_size))
+            
+            return composite
+        except Exception as e:
+            print(f"Error fetching map tiles: {e}")
+            # Return a default ocean-colored image
+            return Image.new('RGB', (768, 768), color=(50, 120, 200))
+    
+    def image_to_texture(self, image):
+        """Convert PIL image to OpenGL texture"""
+        try:
+            # Convert image to RGB if needed
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            image_data = image.tobytes("raw", "RGB", 0, -1)
+            
+            # Create texture
+            texture = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, texture)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.width, image.height, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
+            
+            return texture
+        except Exception as e:
+            print(f"Error creating texture: {e}")
+            return None
+    
+    def update_map_tiles(self):
+        """Update map tiles based on current position"""
+        if self.map_dirty:
+            print(f"Fetching map tiles for {self.latitude:.2f}, {self.longitude:.2f} (zoom: {self.zoom_level})")
+            map_image = self.fetch_map_tiles(self.latitude, self.longitude, self.zoom_level)
+            self.tile_texture = self.image_to_texture(map_image)
+            self.map_dirty = False
+    
     def detect_pan(self, hand_landmarks, hand_label):
         """Detect hand movement to pan the map"""
         palm_x = hand_landmarks.landmark[9].x
@@ -212,9 +298,16 @@ class GestureController3D:
                 delta_x = palm_x - self.prev_hand_x
                 delta_y = palm_y - self.prev_hand_y
                 
-                # Update map offset based on movement
-                self.map_offset_x -= delta_x * 10
-                self.map_offset_y += delta_y * 10
+                # Update coordinates based on movement (adjust scale for zoom level)
+                scale_factor = 180.0 / (2 ** (self.zoom_level - 1))
+                self.longitude -= delta_x * scale_factor
+                self.latitude += delta_y * scale_factor
+                
+                # Keep within valid ranges
+                self.longitude = self.longitude % 360
+                self.latitude = max(-85.051129, min(85.051129, self.latitude))
+                
+                self.map_dirty = True
             
             self.prev_hand_x = palm_x
             self.prev_hand_y = palm_y
@@ -231,79 +324,53 @@ class GestureController3D:
             
             if self.prev_distance > 0:
                 # Increase zoom if fingers moving apart, decrease if pinching
-                zoom_delta = (distance - self.prev_distance) * 5
-                self.map_zoom += zoom_delta
-                self.map_zoom = max(0.5, min(3.0, self.map_zoom))
+                zoom_delta = (distance - self.prev_distance) * 10
+                if zoom_delta > 0.01:  # Zoom in
+                    self.zoom_level = min(18, self.zoom_level + 1)
+                    self.map_dirty = True
+                elif zoom_delta < -0.01:  # Zoom out
+                    self.zoom_level = max(1, self.zoom_level - 1)
+                    self.map_dirty = True
             
             self.prev_distance = distance
     
     def draw_world_map(self):
-        """Draw simplified world map with continents and oceans"""
-        # Ocean background - fill entire view
-        glColor3f(0.1, 0.4, 0.8)  # Ocean blue
-        glBegin(GL_QUADS)
-        glVertex3f(-150, -120, 0)
-        glVertex3f(150, -120, 0)
-        glVertex3f(150, 120, 0)
-        glVertex3f(-150, 120, 0)
-        glEnd()
+        """Draw real OpenStreetMap tiles as a textured background"""
+        # Update tiles if needed
+        self.update_map_tiles()
         
-        # Draw continents as large colored rectangles
-        continents = [
-            # (x1, y1, x2, y2, color) - position on map
-            (-120, 20, -60, 70, (0.2, 0.7, 0.2)),    # North America
-            (-110, -60, -40, 15, (0.2, 0.7, 0.2)),   # South America
-            (-40, 15, 60, 80, (0.25, 0.6, 0.2)),     # Europe + Africa
-            (40, -70, 110, 15, (0.2, 0.7, 0.2)),     # Australia area
-            (30, 20, 130, 80, (0.22, 0.65, 0.2)),    # Asia
-        ]
-        
-        # Draw continent shapes
-        for x1, y1, x2, y2, color in continents:
-            glColor3f(*color)
+        # Draw textured map if tiles are available
+        if self.tile_texture is not None:
+            glEnable(GL_TEXTURE_2D)
+            glBindTexture(GL_TEXTURE_2D, self.tile_texture)
+            
+            # Draw a large quad with the map texture
+            glColor3f(1.0, 1.0, 1.0)
             glBegin(GL_QUADS)
-            glVertex3f(x1, y1, 0.01)
-            glVertex3f(x2, y1, 0.01)
-            glVertex3f(x2, y2, 0.01)
-            glVertex3f(x1, y2, 0.01)
+            glTexCoord2f(0, 1)
+            glVertex3f(-150, -120, 0)
+            glTexCoord2f(1, 1)
+            glVertex3f(150, -120, 0)
+            glTexCoord2f(1, 0)
+            glVertex3f(150, 120, 0)
+            glTexCoord2f(0, 0)
+            glVertex3f(-150, 120, 0)
+            glEnd()
+            
+            glDisable(GL_TEXTURE_2D)
+        else:
+            # Fallback: draw ocean blue background
+            glColor3f(0.1, 0.4, 0.8)
+            glBegin(GL_QUADS)
+            glVertex3f(-150, -120, 0)
+            glVertex3f(150, -120, 0)
+            glVertex3f(150, 120, 0)
+            glVertex3f(-150, 120, 0)
             glEnd()
         
-        # Draw country/region borders (light lines)
-        glColor3f(0.4, 0.4, 0.4)
-        glLineWidth(1.0)
-        glBegin(GL_LINES)
-        
-        # Vertical border lines
-        for x in range(-120, 140, 30):
-            glVertex3f(x, -100, 0.02)
-            glVertex3f(x, 100, 0.02)
-        
-        # Horizontal border lines
-        for y in range(-80, 100, 30):
-            glVertex3f(-140, y, 0.02)
-            glVertex3f(140, y, 0.02)
-        
-        glEnd()
-        glLineWidth(1.0)
-        
-        # Draw major city markers on continents
-        cities = [
-            (-90, 45, (1.0, 0.2, 0.2)),      # North America - Red
-            (-75, -20, (1.0, 0.2, 0.2)),     # South America - Red
-            (10, 50, (1.0, 0.8, 0.0)),       # Europe - Yellow
-            (20, 30, (1.0, 0.8, 0.0)),       # Africa - Yellow
-            (80, 50, (0.2, 0.8, 1.0)),       # Asia - Cyan
-            (75, -25, (0.8, 0.2, 1.0)),      # Australia - Magenta
-        ]
-        
-        # Draw city markers as visible points
-        glPointSize(10.0)
-        glBegin(GL_POINTS)
-        for cx, cy, color in cities:
-            glColor3f(*color)
-            glVertex3f(cx, cy, 0.05)
-        glEnd()
-        glPointSize(1.0)
+        # Draw coordinate info
+        glDisable(GL_LIGHTING)
+        glColor3f(1.0, 1.0, 1.0)
     
     def draw_map_grid(self):
         """Draw an interactive grid-based map"""
@@ -414,16 +481,17 @@ class GestureController3D:
         glTranslatef(0, 0, -150)  # Position camera to view the map
         
         print("=" * 50)
-        print("Gesture Control Map Navigation")
+        print("Gesture Control - Real Map Navigation")
         print("=" * 50)
         print("\nControls:")
         print("  Left Hand:")
-        print("    - Move hand to PAN the map")
+        print("    - Move hand to PAN the map (scroll)")
         print("  Right Hand:")
-        print("    - PINCH gesture (thumb + index): ZOOM in/out")
+        print("    - PINCH gesture: ZOOM in/out (1-18 levels)")
         print("    - Move fingers apart: Zoom in")
         print("    - Pinch (bring together): Zoom out")
-        print("  Press 'q' or close window to quit\n")
+        print("  Press 'q' or close window to quit")
+        print(f"  Starting at: Latitude {self.latitude:.2f}, Longitude {self.longitude:.2f}\n")
         
         clock = pygame.time.Clock()
         running = True
